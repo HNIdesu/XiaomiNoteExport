@@ -209,7 +209,7 @@ function saveFile(data:any,mime:string,filename:string){
     window.URL.revokeObjectURL(url)
 }
 
-function Md5Diggest(data:ArrayBuffer):string{
+function Md5Digest(data:ArrayBuffer):string{
 	const buffer=new GSparkMD5.ArrayBuffer()
 	buffer.append(data)
 	return buffer.end()
@@ -231,7 +231,7 @@ function downloadResource(url:string):Promise<ImgData|SoundData>{
 			res.arrayBuffer().then(rawData=>{
 				if(contentType?.startsWith("image/")){
 					const mime=contentType?contentType:"image/jpeg"
-					const md5=Md5Diggest(rawData)
+					const md5=Md5Digest(rawData)
 					const blob = new Blob([rawData], { type: mime });
 					const url = URL.createObjectURL(blob);
 					const img = new Image();
