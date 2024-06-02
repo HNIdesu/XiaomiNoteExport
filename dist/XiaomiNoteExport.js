@@ -26,12 +26,12 @@ function toTimeString(ts) {
         `${date.getUTCSeconds().toString().padStart(2, "0")}Z`;
 }
 function createEnexDocument() {
-    const doctype = document.implementation.createDocumentType("en-export", "", "http://xml.evernote.com/pub/evernote-export2.dtd");
+    const doctype = document.implementation.createDocumentType("en-export", "", "http://xml.evernote.com/pub/evernote-export4.dtd");
     const doc = document.implementation.createDocument(null, "en-export", doctype);
     const root = doc.documentElement;
     root.setAttribute("export-date", toTimeString(new Date()));
-    root.setAttribute("application", "Evernote/Windows");
-    root.setAttribute("version", "6.x");
+    root.setAttribute("application", "Evernote");
+    root.setAttribute("version", "10.89.2");
     return doc;
 }
 function findAllMatches(text, reg) {
@@ -40,12 +40,82 @@ function findAllMatches(text, reg) {
         result.push(match[0]);
     return result;
 }
+function where(collection, func) {
+    const result = [];
+    for (let i = 0; i < collection.length; i++)
+        if (func(collection[i]))
+            result.push(collection[i]);
+    return result;
+}
+function onPctureLoaded(text) {
+    const dom = new DOMParser().parseFromString(text, "text/html");
+    where(dom.getElementsByTagName("text"), () => true).forEach(node => {
+        const ele = node;
+        const newNode = dom.createElement("div");
+        newNode.innerHTML = ele.innerHTML;
+        ele.parentNode?.replaceChild(newNode, ele);
+    });
+    where(dom.getElementsByTagName("new-format"), () => true).forEach(node => {
+        const ele = node;
+        ele.outerHTML = ele.innerHTML;
+    });
+    where(dom.getElementsByTagName("delete"), () => true).forEach(node => {
+        const ele = node;
+        const newNode = dom.createElement("s");
+        newNode.innerHTML = ele.innerHTML;
+        ele.parentNode?.replaceChild(newNode, ele);
+    });
+    where(dom.getElementsByTagName("input"), ele => ele.getAttribute("type") == "checkbox").forEach(node => {
+        const ele = node;
+        const checked = ele.getAttribute("checked") ?? "false";
+        const newNode = dom.createElement("en-todo");
+        newNode.setAttribute("checked", checked);
+        const outerNode = dom.createElement("div");
+        outerNode.appendChild(newNode);
+        const next = ele.nextSibling;
+        if (next) {
+            next.parentNode?.removeChild(next);
+            outerNode.appendChild(next);
+        }
+        ele.parentNode?.replaceChild(outerNode, ele);
+    });
+    where(dom.getElementsByTagName("size"), () => true).forEach(node => {
+        const ele = node;
+        const newNode = dom.createElement("font");
+        newNode.style.fontSize = "18pt";
+        newNode.innerHTML = ele.innerHTML;
+        ele.parentNode?.replaceChild(newNode, ele);
+    });
+    where(dom.getElementsByTagName("mid-size"), () => true).forEach(node => {
+        const ele = node;
+        const newNode = dom.createElement("font");
+        newNode.style.fontSize = "16pt";
+        newNode.innerHTML = ele.innerHTML;
+        ele.parentNode?.replaceChild(newNode, ele);
+    });
+    where(dom.getElementsByTagName("h3-size"), () => true).forEach(node => {
+        const ele = node;
+        const newNode = dom.createElement("font");
+        newNode.style.fontSize = "14pt";
+        newNode.innerHTML = ele.innerHTML;
+        ele.parentNode?.replaceChild(newNode, ele);
+    });
+    where(dom.getElementsByTagName("background"), () => true).forEach(node => {
+        const ele = node;
+        const color = ele.getAttribute("color");
+        const newNode = dom.createElement("span");
+        newNode.setAttribute("style", `background-color:${color} ;-evernote-highlight:true;`);
+        newNode.innerHTML = ele.innerHTML;
+        ele.parentNode?.replaceChild(newNode, ele);
+    });
+    return dom.body.innerHTML;
+}
 const FolderList = new Map();
 FolderList.set(0, { subject: "未分类", notes: [] });
 FolderList.set(2, { subject: "私密笔记", notes: [] });
 async function handleFolderList() {
     for (const pair of FolderList) {
-        //if(pair[1].subject!="日记")continue;//可以修改这里以筛选要下载的笔记
+        //if(pair[1].subject!="未分类")continue;//可以修改这里以筛选要下载的笔记
         const folder = pair[1];
         const xmlDoc = createEnexDocument();
         const notePromiseList = [];
@@ -55,17 +125,7 @@ async function handleFolderList() {
                     const resources = new Map();
                     const createDate = note.data.entry.createDate;
                     const modifyDate = note.data.entry.modifyDate;
-                    let content = (function () {
-                        const rawContent = note.data.entry.content;
-                        let newContent = "";
-                        for (const line of rawContent.split("\n")) {
-                            if (line == "")
-                                newContent += "<div><br /></div>";
-                            else
-                                newContent += "<div>" + line + "</div>";
-                        }
-                        return newContent;
-                    })();
+                    let content = note.data.entry.content;
                     const pattern = /☺.+?<[^\/]+\/><[^\/]*\/>/g;
                     const matches = findAllMatches(note.data.entry.content, pattern);
                     for (const img of matches) {
@@ -139,6 +199,7 @@ async function handleFolderList() {
                         }));
                     }
                     Promise.all(downloadResourcePromiseList).then(() => {
+                        content = onPctureLoaded(content);
                         theContent.innerHTML = `<![CDATA[<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd"><en-note><div>${content}</div></en-note>]]>`;
                         xmlDoc.documentElement.appendChild(theNote);
                         resolve2();
