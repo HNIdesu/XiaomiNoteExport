@@ -34,11 +34,18 @@ function createEnexDocument() {
     root.setAttribute("version", "6.x");
     return doc;
 }
+function findAllMatches(text, reg) {
+    const result = [];
+    for (let match = reg.exec(text); match; match = reg.exec(text))
+        result.push(match[0]);
+    return result;
+}
 const FolderList = new Map();
 FolderList.set(0, { subject: "未分类", notes: [] });
 FolderList.set(2, { subject: "私密笔记", notes: [] });
 async function handleFolderList() {
     for (const pair of FolderList) {
+        //if(pair[1].subject!="日记")continue;//可以修改这里以筛选要下载的笔记
         const folder = pair[1];
         const xmlDoc = createEnexDocument();
         const notePromiseList = [];
@@ -59,18 +66,16 @@ async function handleFolderList() {
                         }
                         return newContent;
                     })();
-                    const pattern = /☺.+?<0\/><\/>/g;
-                    const matches = pattern.exec(note.data.entry.content);
-                    if (matches) {
-                        for (const img of matches) {
-                            const fileId = img.substring(2, img.length - 7);
-                            const imgUrl = "https://i.mi.com/file/full?type=note_img&fileid=" + fileId;
-                            resources.set(imgUrl, img);
-                        }
+                    const pattern = /☺.+?<[^\/]+\/><[^\/]*\/>/g;
+                    const matches = findAllMatches(note.data.entry.content, pattern);
+                    for (const img of matches) {
+                        const fileId = img.substring(2, img.indexOf("<"));
+                        const imgUrl = "https://i.mi.com/file/full?type=note_img&fileid=" + fileId;
+                        resources.set(imgUrl, img);
                     }
                     const title = (function () {
                         const t = JSON.parse(note.data.entry.extraInfo).title;
-                        return t == "" ? "无标题笔记" : t;
+                        return (!t) || t == "" ? "无标题笔记" : t;
                     })();
                     const theNote = xmlDoc.createElement("note");
                     xmlDoc.documentElement.appendChild(theNote);
@@ -116,9 +121,6 @@ async function handleFolderList() {
                                     const theHeight = xmlDoc.createElement("height");
                                     theHeight.appendChild(xmlDoc.createTextNode(resData.height.toString()));
                                     theResource.appendChild(theHeight);
-                                    const theRecognition = xmlDoc.createElement("recognition");
-                                    theRecognition.innerHTML = `<![CDATA[<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE recoIndex SYSTEM "http://xml.evernote.com/pub/recoIndex.dtd"><recoIndex docType="unknown" objType="image" objID="${objId}" engineVersion="7.0.24.1" recoType="service" lang="zh" objWidth="${resData.width}" objHeight="${resData.height}"></recoIndex>]]>`;
-                                    theResource.appendChild(theRecognition);
                                 }
                                 content = content.replaceAll(placeholder, `<div><en-media type="${resData.mime}" hash="${objId}"/></div>`);
                                 const theResourceAttr = xmlDoc.createElement("resource-attributes");
@@ -176,7 +178,7 @@ function saveFile(data, mime, filename) {
     a.click();
     window.URL.revokeObjectURL(url);
 }
-function Md5Diggest(data) {
+function Md5Digest(data) {
     const buffer = new GSparkMD5.ArrayBuffer();
     buffer.append(data);
     return buffer.end();
@@ -196,7 +198,7 @@ function downloadResource(url) {
             res.arrayBuffer().then(rawData => {
                 if (contentType?.startsWith("image/")) {
                     const mime = contentType ? contentType : "image/jpeg";
-                    const md5 = Md5Diggest(rawData);
+                    const md5 = Md5Digest(rawData);
                     const blob = new Blob([rawData], { type: mime });
                     const url = URL.createObjectURL(blob);
                     const img = new Image();
