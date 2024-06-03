@@ -1,4 +1,4 @@
-var GSparkMD5:any//MD5 diggest module
+var GSparkMD5:any//MD5 digest module
 class Folder{
 	subject:string=""//folder display name
 	notes:Array<string>=[]

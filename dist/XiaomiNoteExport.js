@@ -1,5 +1,5 @@
 "use strict";
-var GSparkMD5; //MD5 diggest module
+var GSparkMD5; //MD5 digest module
 class Folder {
     subject = ""; //folder display name
     notes = [];
