@@ -108,7 +108,7 @@ function onPctureLoaded(text) {
         newNode.innerHTML = ele.innerHTML;
         ele.parentNode?.replaceChild(newNode, ele);
     });
-    return dom.body.innerHTML;
+    return dom.body.innerHTML.replaceAll("\n", "\n\n");
 }
 const FolderList = new Map();
 FolderList.set(0, { subject: "未分类", notes: [] });

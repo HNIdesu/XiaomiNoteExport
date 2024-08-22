@@ -127,7 +127,7 @@ function onPctureLoaded(text:string):string{
 		ele.parentNode?.replaceChild(newNode,ele)	
 	})
 
-	return dom.body.innerHTML
+	return dom.body.innerHTML.replaceAll("\n","\n\n")
 }
 
 const FolderList:Map<number,Folder>=new Map<number,Folder>()
