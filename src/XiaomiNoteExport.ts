@@ -55,6 +55,35 @@ function where(collection:any,func:(x:any)=>boolean):Array<any>{
 	return result
 }
 
+
+function  ParseImageAsync(url:string):Promise<HTMLImageElement>{
+    return new Promise<HTMLImageElement>((resolve,reject)=>{
+		const img = new Image();
+		img.onload = function () {
+            resolve(img)
+        };
+		img.onerror = reject;
+		img.src = url;
+	})
+}
+async function downloadResourceAsync(url:string):Promise<ImgData> {
+    const res=await fetch(url)
+    const contentType = res.headers.get("Content-Type");
+    const rawData=await res.arrayBuffer()
+    if (contentType?.startsWith("image/")) {
+        const mime = contentType ? contentType : "image/jpeg";
+        const md5 = Md5Digest(rawData);
+        const blob = new Blob([rawData], { type: mime });
+        const url = URL.createObjectURL(blob);
+		const img=await ParseImageAsync(url)
+		URL.revokeObjectURL(url);
+        return { data: base64Encode(rawData), hash: md5, width: img.width, height: img.height, mime: mime };
+    }
+    else
+        throw new Error("not supported resource type");
+
+}
+
 function onPctureLoaded(text:string):string{
 	const dom=new DOMParser().parseFromString(text,"text/html")
 
@@ -134,128 +163,101 @@ const FolderList:Map<number,Folder>=new Map<number,Folder>()
 FolderList.set(0,{subject:"未分类",notes:[]})
 FolderList.set(2,{subject:"私密笔记",notes:[]})
 
-async function handleFolderList(){
-	for(const pair of FolderList)
-	{
-		//if(pair[1].subject!="未分类")continue;//可以修改这里以筛选要下载的笔记
-		const folder=pair[1]
-		const xmlDoc=createEnexDocument()
-		const notePromiseList:Array<Promise<void>>=[]
-		for(const noteId of folder.notes){
-			notePromiseList.push(new Promise<void>((resolve2,reject2)=>{
-				downloadNote(noteId).then(note=>{
-					const resources:Map<string,string>=new Map<string,string>()
-					const createDate=note.data.entry.createDate as number
-					const modifyDate=note.data.entry.modifyDate as number
-					let content=note.data.entry.content
-					const pattern=/☺.+?<[^\/]+\/><[^\/]*\/>/g
-					const matches=findAllMatches(note.data.entry.content,pattern)
-					for(const img of matches){
-						const fileId= img.substring(2,img.indexOf("<"))
-						const imgUrl="https://i.mi.com/file/full?type=note_img&fileid="+fileId
-						resources.set(imgUrl,img)
-					}
-					
-					const title=(function(){
-						const t=JSON.parse(note.data.entry.extraInfo).title
-						return (!t)||t==""?"无标题笔记":t
-					})()
-	
-					const theNote=xmlDoc.createElement("note")
-					xmlDoc.documentElement.appendChild(theNote)
-					
-					const theTitle=xmlDoc.createElement("title")
-					theTitle.appendChild(xmlDoc.createTextNode(title))
-					theNote.appendChild(theTitle)
-					
-					const theContent=xmlDoc.createElement("content")
-					theNote.appendChild(theContent)
-					
-					const theCreateDate=xmlDoc.createElement("created")
-					theCreateDate.appendChild(xmlDoc.createTextNode(toTimeString(createDate)))
-					theNote.appendChild(theCreateDate)
-					
-					const theUpdateDate=xmlDoc.createElement("updated")
-					theUpdateDate.appendChild(xmlDoc.createTextNode(toTimeString(modifyDate)))
-					theNote.appendChild(theUpdateDate)
-					
-					const theNoteAttr=xmlDoc.createElement("note-attributes")
-					{
-						let x=xmlDoc.createElement("author")
-						theNoteAttr.appendChild(x)
-						x=xmlDoc.createElement("source")
-						theNoteAttr.appendChild(x)
-						x=xmlDoc.createElement("source-application")
-						theNoteAttr.appendChild(x)
-					}
-					theNote.appendChild(theNoteAttr)
-					
-					const downloadResourcePromiseList:Array<Promise<void>>=[]
-					for(const [resourceUrl,placeholder] of resources){
-						downloadResourcePromiseList.push(new Promise<void>((resolve1,reject1)=>{
-							const theResource=xmlDoc.createElement("resource")
-							downloadResource(resourceUrl).then(resData=>{
-								const theData=xmlDoc.createElement("data")
-								theData.setAttribute("encoding","base64")
-								theData.appendChild(xmlDoc.createTextNode(resData.data))
-								theResource.appendChild(theData)
-								
-								const theMime=xmlDoc.createElement("mime")
-								theMime.appendChild(xmlDoc.createTextNode(resData.mime))
-								theResource.appendChild(theMime)
-
-								const [majorType,subType]=resData.mime.split("/")
-								const objId=resData.hash
-								if(resData instanceof(ImgData)){
-									const theWidth=xmlDoc.createElement("width")
-									theWidth.appendChild(xmlDoc.createTextNode(resData.width.toString()))
-									theResource.appendChild(theWidth)
-									
-									const theHeight=xmlDoc.createElement("height")
-									theHeight.appendChild(xmlDoc.createTextNode(resData.height.toString()))
-									theResource.appendChild(theHeight)
-								}
-								content=content.replaceAll(placeholder,`<div><en-media type="${resData.mime}" hash="${objId}"/></div>`)
-								
-								const theResourceAttr=xmlDoc.createElement("resource-attributes")
-								{
-									let x=xmlDoc.createElement("source-url")
-									x.appendChild(xmlDoc.createTextNode(""))
-									theResourceAttr.appendChild(x)
-
-									x=xmlDoc.createElement("file-name")
-									x.appendChild(xmlDoc.createTextNode(`minote_${objId}.${subType}`))
-									theResourceAttr.appendChild(x)
-								}
-								theResource.appendChild(theResourceAttr)
-
-								theNote.appendChild(theResource)
-								resolve1()
-							}).catch(err=>reject1(err))
-						}))
-						
-					}
-
-					Promise.all(downloadResourcePromiseList).then(()=>{
-						content=onPctureLoaded(content)
-						theContent.innerHTML=`<![CDATA[<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd"><en-note><div>${content}</div></en-note>]]>`
-						xmlDoc.documentElement.appendChild(theNote)
-						resolve2()
-					}).catch(err=>reject2(err))
-					
-				}).catch(err=>reject2(err))
-			}))
-				
-		}
-		Promise.all(notePromiseList).then(()=>{
-			const serializer = new XMLSerializer()
-			const xmlString='<?xml version="1.0" encoding="UTF-8"?>'+serializer.serializeToString(xmlDoc)
-			saveFile(xmlString,"text/plain",folder.subject+".enex")
-		})
-		
-	}
+async function handleFolderList() {
+    for (const pair of FolderList) {
+        //if(pair[1].subject!="未分类")continue;//可以修改这里以筛选要下载的笔记
+        const folder = pair[1];
+        const xmlDoc = createEnexDocument();
+        const notePromiseList = [];
+        for (const noteId of folder.notes) {
+            notePromiseList.push((async() => {
+                const note=await downloadNoteAsync(noteId);
+                const resources = new Map();
+                const createDate = note.data.entry.createDate;
+                const modifyDate = note.data.entry.modifyDate;
+                let content = note.data.entry.content;
+                const pattern = /☺.+?<[^\/]+\/><[^\/]*\/>/g;
+                const matches = findAllMatches(note.data.entry.content, pattern);
+                for (const img of matches) {
+                    const fileId = img.substring(2, img.indexOf("<"));
+                    const imgUrl = "https://i.mi.com/file/full?type=note_img&fileid=" + fileId;
+                    resources.set(imgUrl, img);
+                }
+                const title = (function () {
+                    const t = JSON.parse(note.data.entry.extraInfo).title;
+                    return (!t) || t == "" ? "无标题笔记" : t;
+                })();
+                const theNote = xmlDoc.createElement("note");
+                xmlDoc.documentElement.appendChild(theNote);
+                const theTitle = xmlDoc.createElement("title");
+                theTitle.appendChild(xmlDoc.createTextNode(title));
+                theNote.appendChild(theTitle);
+                const theContent = xmlDoc.createElement("content");
+                theNote.appendChild(theContent);
+                const theCreateDate = xmlDoc.createElement("created");
+                theCreateDate.appendChild(xmlDoc.createTextNode(toTimeString(createDate)));
+                theNote.appendChild(theCreateDate);
+                const theUpdateDate = xmlDoc.createElement("updated");
+                theUpdateDate.appendChild(xmlDoc.createTextNode(toTimeString(modifyDate)));
+                theNote.appendChild(theUpdateDate);
+                const theNoteAttr = xmlDoc.createElement("note-attributes");
+                {
+                    let x = xmlDoc.createElement("author");
+                    theNoteAttr.appendChild(x);
+                    x = xmlDoc.createElement("source");
+                    theNoteAttr.appendChild(x);
+                    x = xmlDoc.createElement("source-application");
+                    theNoteAttr.appendChild(x);
+                }
+                theNote.appendChild(theNoteAttr);
+                const downloadResourcePromiseList = [];
+                for (const [resourceUrl, placeholder] of resources) {
+                    downloadResourcePromiseList.push((async () => {
+                        const theResource = xmlDoc.createElement("resource");
+                        const resData=await downloadResourceAsync(resourceUrl)
+                        const theData = xmlDoc.createElement("data");
+                            theData.setAttribute("encoding", "base64");
+                            theData.appendChild(xmlDoc.createTextNode(resData.data));
+                            theResource.appendChild(theData);
+                            const theMime = xmlDoc.createElement("mime");
+                            theMime.appendChild(xmlDoc.createTextNode(resData.mime));
+                            theResource.appendChild(theMime);
+                            const [majorType, subType] = resData.mime.split("/");
+                            const objId = resData.hash;
+                            if (resData instanceof (ImgData)) {
+                                const theWidth = xmlDoc.createElement("width");
+                                theWidth.appendChild(xmlDoc.createTextNode(resData.width.toString()));
+                                theResource.appendChild(theWidth);
+                                const theHeight = xmlDoc.createElement("height");
+                                theHeight.appendChild(xmlDoc.createTextNode(resData.height.toString()));
+                                theResource.appendChild(theHeight);
+                            }
+                            content = content.replaceAll(placeholder, `<div><en-media type="${resData.mime}" hash="${objId}"/></div>`);
+                            const theResourceAttr = xmlDoc.createElement("resource-attributes");
+                            {
+                                let x = xmlDoc.createElement("source-url");
+                                x.appendChild(xmlDoc.createTextNode(""));
+                                theResourceAttr.appendChild(x);
+                                x = xmlDoc.createElement("file-name");
+                                x.appendChild(xmlDoc.createTextNode(`minote_${objId}.${subType}`));
+                                theResourceAttr.appendChild(x);
+                            }
+                            theResource.appendChild(theResourceAttr);
+                            theNote.appendChild(theResource);
+                    })());
+                }
+                await Promise.all(downloadResourcePromiseList)
+				content = onPctureLoaded(content);
+				theContent.innerHTML = `<![CDATA[<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd"><en-note><div>${content}</div></en-note>]]>`;
+				xmlDoc.documentElement.appendChild(theNote);
+            })());
+        }
+        await Promise.all(notePromiseList)
+		const serializer = new XMLSerializer();
+		const xmlString = '<?xml version="1.0" encoding="UTF-8"?>' + serializer.serializeToString(xmlDoc);
+		saveFile(xmlString, "text/plain", folder.subject + ".enex");
+    }
 }
-
 function downloadNotesRecursive(syncTag:string|null,noteCollection:Array<any>) {
     const url="https://i.mi.com/note/full/page/?limit=200"+(syncTag?`&syncTag=${syncTag}`:"")
     fetch(url).then(res=>res.json()).then(json=>{
@@ -264,8 +266,13 @@ function downloadNotesRecursive(syncTag:string|null,noteCollection:Array<any>) {
 		for(const entry of json.data.entries)
 			noteCollection.push(entry)
         if(json.data.entries.length==0){
-			for(const entry of noteCollection)
-				FolderList.get(entry.folderId as number)!.notes.push(entry.id)
+			for(const entry of noteCollection){
+				const folder=FolderList.get(entry.folderId as number)
+				if(!folder)
+					console.warn(`folder of the entry not found: \n${entry}`)
+				else
+					folder.notes.push(entry.id)
+			}
             handleFolderList()
 			return
 		}
@@ -299,43 +306,12 @@ function base64Encode(arrayBuffer:ArrayBuffer):string {
 	return btoa(binaryString);
 }
 
-function downloadResource(url:string):Promise<ImgData|SoundData>{
-	return new Promise((resolve,reject)=>{
-		fetch(url).then(res=>{
-			const contentType=res.headers.get("Content-Type")
-			res.arrayBuffer().then(rawData=>{
-				if(contentType?.startsWith("image/")){
-					const mime=contentType?contentType:"image/jpeg"
-					const md5=Md5Digest(rawData)
-					const blob = new Blob([rawData], { type: mime });
-					const url = URL.createObjectURL(blob);
-					const img = new Image();
-					img.onload = function() {
-						URL.revokeObjectURL(url);
-						resolve({data:base64Encode(rawData),hash:md5,width:img.width,height:img.height,mime:mime})
-					};
-					img.onerror=err=>reject(err)
-					img.src=url
-				}else if(contentType?.startsWith("audio/")){
-					reject("audio media not supported")
-				}
-				else
-					reject()
-				
-			})
-		}).catch(err=>reject(err))
-	})
-}
 
-function downloadNote(noteId:string):Promise<any> {
+async function downloadNoteAsync(noteId:string):Promise<any> {
     const url=`https://i.mi.com/note/note/${noteId}/`
-	return new Promise((resolve,reject)=>{
-		fetch(url).then(res=>res.json()).then(json=>{
-			resolve(json)
-		}).catch(err=>{
-			reject(err)
-		})
-	})
+	const res=await fetch(url)
+	const json=await res.json()
+	return json
 }
 
 function main(){
